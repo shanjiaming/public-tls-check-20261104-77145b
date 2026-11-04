@@ -1,0 +1,32 @@
+name: Public CC312 bounded-budget loopback probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  public-cli-budget:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch one fixed public binary
+        run: |
+          python3.12 -I -B ci/cc312-public-budget/fetch_public_binary.py --output "$RUNNER_TEMP/cc312-public-binary"
+      - name: Actual CLI against synthetic loopback stub in private netns
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/cc312-budget-evidence"
+          sudo systemd-run --wait --pipe --collect --unit="cc312-public-budget-${GITHUB_RUN_ID}" \
+            --property=CPUQuota=200% --property=MemoryMax=2G --property=TasksMax=128 \
+            --property=RuntimeMaxSec=300 --property=KillMode=control-group \
+            /usr/bin/python3.12 -I -B "$GITHUB_WORKSPACE/ci/cc312-public-budget/run_linux_probe.py" \
+            --binary "$RUNNER_TEMP/cc312-public-binary/claude" \
+            --output "$RUNNER_TEMP/cc312-budget-evidence/wire-v2.json"
+          sudo chmod 644 "$RUNNER_TEMP/cc312-budget-evidence/wire-v2.json"
+      - name: Preserve only bounded public probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc312-public-budget-wire-v2
+          path: ${{ runner.temp }}/cc312-budget-evidence/
+          retention-days: 7
+          if-no-files-found: warn
