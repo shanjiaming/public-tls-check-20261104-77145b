@@ -1,0 +1,39 @@
+name: Public credential-free TLS comparison
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Checkout exact generic diagnostic
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Bounded credential-free HTTPS comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          echo 'c5155027e4036835b3ff9f4aa697173e5a558415699554a1687cbe9578f4f188  probe.py' | sha256sum --check --status
+          timeout --signal=TERM --kill-after=3s 60s sudo systemd-run --quiet --scope \
+            --property=CPUQuota=100% --property=MemoryMax=134217728 --property=TasksMax=32 \
+            env -i PATH=/usr/bin:/bin python3 -I -B "$GITHUB_WORKSPACE/probe.py" >result.json
+          python3 -I -B - <<'PYCODE'
+          import json,pathlib
+          d=json.loads(pathlib.Path('result.json').read_text())
+          assert d['scope']=='unsigned_public_TLS_only_no_cloud_access_no_credentials'
+          assert len(d['checks'])==4
+          assert {r['host'] for r in d['checks']}=={'ecs.aliyuncs.com','ecs.ap-southeast-1.aliyuncs.com','help.aliyun.com','api.github.com'}
+          print(json.dumps(d,sort_keys=True))
+          PYCODE
+      - name: Preserve public diagnostic result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-tls-result
+          path: result.json
+          retention-days: 1
+          if-no-files-found: warn
